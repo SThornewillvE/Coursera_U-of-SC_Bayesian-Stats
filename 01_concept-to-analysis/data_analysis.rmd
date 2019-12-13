@@ -1,0 +1,58 @@
+---
+title: "Data Analysis in R"
+author: "Simon Thornewill von Essen"
+date: "12 12 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Now that we've covered the basics of R, we can start doing some basic data analysis.
+
+Below, we have the scenario.
+
+```
+Suppose we are giving two students a multiple-choice exam w/ 40 questions where each question has 4 choices.
+
+We don't know how much the students have studied for this exam, but we think that they will do better than just guessing at random.
+```
+
+Using these scenarios, we want to answer the following questions:
+
+`1. What are the random paramters of interest?`
+
+Here, we have two parameters. The likelihood of student 1 answering correctly and the likelihood of student 2 answering correctly.
+
+`2. What is out likelihood?`
+
+Hence, the likelihood is $\textrm{Binomial}(40, \theta)$.
+
+`3. What prior should we use?`
+
+The conjugate prior for a binomial distribution is a beta distribution.
+
+`4. What is the prior prob P(thet1a>0.25)? P(theta1>0.5)? P(theta1>0.8)?`
+
+```{r}
+1-pbeta(0.25, 8, 4)
+1-pbeta(0.50, 8, 4)
+1-pbeta(0.80, 8, 4)
+
+```
+
+`5. Suppose that the first student gets 33 answers correct. What is the posterior distribution for theta2? P(thet1a>0.25)? P(theta1>0.5)? P(theta1>0.8)?`
+
+```{r}
+1-pbeta(0.25, 8+33, 4+40-33)
+1-pbeta(0.50, 8+33, 4+40-33)
+1-pbeta(0.80, 8+33, 4+40-33)
+```
+
+
+`6. Suppose the 2nd student gets 24 questions right. What is the posterior distribution for theta2 now?`
+
+`7. What is the posterior probability that theta1>theta2, i.e., that the first student has a better chance of getting a question right htan the second student?`
+
+## Question 1: 

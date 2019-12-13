@@ -1,0 +1,96 @@
+---
+title: "Introduction to R"
+author: "Simon Thornewill von Essen"
+date: "12 12 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+R is a statistical package.
+
+When you type in math, it will try and solve this math.
+
+```{r}
+1+2*3
+```
+
+You can attach a name to the result of a calulation and save it to reference later.
+
+```{r}
+x <- 6  # Note you can use = instead of <- as well
+
+x
+```
+
+You can create vectors using `c` to concatenate data.
+
+```{r}
+z <- c(2, 3, 4, 5, 6)
+
+# You can also use the following
+z <- c(2:6)
+
+z
+```
+
+When we start having vectors (lists of numbers), we can start doing operations and aggregations on them. Note that R is not as much of an object oriented programming language, so instead of calling methods or attributes of an object, you usually use functions instead.
+
+Knowing your functions is key to understanding and using R well.
+
+```{r}
+mean(z)
+var(z)
+```
+
+You can also create sequences, like I userd above, using the `seq` function.
+
+```{r}
+seq(from=0.1, to=0.9, by=0.1)
+```
+
+If you're ever not sure what a function does, you can ask for help.
+
+```{r}
+help(seq)
+```
+
+R has some datasets which are already loaded.
+
+```{r}
+trees
+```
+
+We can attach the column names as variables so that we can call them individually.
+
+```{r}
+attach(trees)
+
+Girth
+```
+
+We can now plot these vectors to get a feel for them.
+
+```{r}
+hist(Girth)
+```
+
+We can also look at scatter plots.
+
+```{r}
+plot(Girth, Height)
+```
+
+We can also look at matrix plots for the entire dataset.
+
+```{r}
+pairs(trees)
+```
+
+Finally, we can get an overview of the stats by calling `summary`.
+
+```{r}
+summary(trees)
+```

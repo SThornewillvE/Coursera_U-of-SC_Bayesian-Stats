@@ -1,0 +1,51 @@
+---
+title: "Plotting Likelihood in R"
+author: "Simon Thornewill von Essen"
+date: "12 12 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this markdown file we will take a closer look at likelihood. Namely, a bernouli likelihood.
+
+```{r}
+likelihood <- function(n, y, theta){
+  return(theta^y*(1-theta)^(n-y))
+}
+```
+
+We can text our likelihood function out:
+
+```{r}
+theta <- seq(from=0.01, to=0.99, by=0.01)
+
+plot(theta, likelihood(400, 72, theta))
+```
+
+If we look at the plot above, we can see that the probability of seeing 72 positives out of 400 flips is maximised at 18%.
+
+We can add lines using the function `abline` to show that this is true.
+
+```{r}
+plot(theta, likelihood(400, 72, theta))
+abline(v=.18)
+```
+
+This can also be made more numerically stable by using the log likelihood. A function for this is created below.
+
+```{r}
+loglike <- function(n, y, theta){
+  return(y*log(theta)+(n-y)*log(1-theta))
+}
+```
+
+Plotting the result, we get the following.
+
+```{r}
+plot(theta, loglike(400, 72, theta), type='l')
+abline(v=.18)
+```
+

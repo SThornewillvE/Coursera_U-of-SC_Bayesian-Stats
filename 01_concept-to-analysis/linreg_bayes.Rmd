@@ -1,0 +1,95 @@
+---
+title: "Bayesian Linear Regression in R"
+author: "Simon Thornewill von Essen"
+date: "12/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We can use linear regression in R in order to perform bayesian linear regression.
+
+```{r}
+oring <- read.table("http://www.randomservices.org/random/data/Challenger2.txt",
+                    header = TRUE)
+
+attach(oring)
+
+head(oring)
+```
+
+The dataset that was just imported was the o-ring damage indices for the 
+challenger 2 launch failure. The higher I is, the more damage was incurred on 
+the ring.
+
+```{r}
+plot(T, I)
+```
+
+We can see that there is a rough linear relationship between the temperature, T,
+and the damage index I. 
+
+We can create a linear regression like so...
+
+```{r}
+oring.lm <- lm(I~T)
+
+summary(oring.lm)
+```
+
+We can see here that for each increase in T we get a -.24 index of damage,
+explaining 41% of the variance. 
+
+## Given the data, what is the 95% posterior probability of the slope?
+
+```{r}
+-0.24337 - 0.06349*qt(0.975, 21)
+-0.24337 + 0.06349*qt(0.975, 21)
+```
+
+This ends up becoming a posterior distribution because we multiply the error by
+the prior, which is a t-distribution. 
+
+Since this interval does not include zero, that should be good eviedence to
+support the hypothesis that there is negative o-ring damage as the temperature
+of the o-rings increases.
+
+## For a given temp, whats the failure index
+
+```{r}
+18.36508 - 0.24337 * 31
+```
+
+However, sometimes we also would like an interval, we can do this like so...
+
+```{r}
+predict(oring.lm,
+        data.frame(T=31),
+        interval = "predict")
+```
+
+We can also calculate this manually. Note that we need to multiply by a scale
+factor: 
+
+$$\sqrt{1 + \frac{1}{n} + \frac{(x^*-\bar{x})^2}{(n-1)s_x^2}}$$
+
+```{r}
+10.82052 - 2.102*qt(0.975, 21)*sqrt(1 + 1/23 + ((31-mean(T))^2/22/var(T)))
+
+10.82052 + 2.102*qt(0.975, 21)*sqrt(1 + 1/23 + ((31-mean(T))^2/22/var(T)))
+```
+
+We can even use this to calculate probabilistic statements of failure given a
+certain point.
+
+```{r}
+1 - pt((0 - 10.82061)/(2.102*sqrt(1 + 1/length(T) +
+                                    ((31-mean(T))^2/(length(T)-1)/var(T)))),
+       21)
+```
+
+However, doing this analytically is kind of tedious, normally we have packages
+that are able to calculate these things for us such as JAGS in R or PyMC/Pyro in
+python.

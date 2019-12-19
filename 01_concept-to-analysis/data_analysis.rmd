@@ -48,11 +48,27 @@ The conjugate prior for a binomial distribution is a beta distribution.
 1-pbeta(0.25, 8+33, 4+40-33)
 1-pbeta(0.50, 8+33, 4+40-33)
 1-pbeta(0.80, 8+33, 4+40-33)
-```
 
+```
 
 `6. Suppose the 2nd student gets 24 questions right. What is the posterior distribution for theta2 now?`
 
+```{r}
+correct <- 22
+total <- 40
+
+1-pbeta(0.25, 8+correct, 4+total-correct)
+1-pbeta(0.50, 8+correct, 4+total-correct)
+1-pbeta(0.80, 8+correct, 4+total-correct)
+
+```
+
 `7. What is the posterior probability that theta1>theta2, i.e., that the first student has a better chance of getting a question right htan the second student?`
 
-## Question 1: 
+```{r}
+student_1.draws <- rbeta(shape1=8+33, shape2=4+40-33, n=1000)
+student_2.draws <- rbeta(shape1=8+22, shape2=4+40-22, n=1000)
+
+mean(student_1.draws > student_2.draws)
+
+```

@@ -1,0 +1,165 @@
+---
+title: "Coin Problem"
+author: "Simon Thornewill von Essen"
+date: "12/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("Rlab")
+```
+
+# Implementation of Coin Problem from Lectures
+
+## Describing the problem
+
+In the lecture we are given a situation where we have both a loaded and a fair
+coin. If we take one out of the bag and flip it, we will see either heads or
+tails.
+
+What we want to estimate is whether the coin is fair or loaded given that we saw
+two heads.
+
+We know the following 
+
+|coin type|probability of heads|probability of drawing coin from bag|
+|---|---|---|
+|fair|0.5|0.4|
+|loaded|0.7|0.6|
+
+For the first step of the algorithm, we need to start eith either the loaded or
+the fair coin. We know this from the third column in the table above.
+
+Then, we need to calculate an alpha value, for this we also need to have a
+proposal candidate. 
+
+We will have a deterministic proposal which means that we will suggest the
+opposite choice to whatever we last drew.
+
+Since our proposal is deterministic, our q-function will always be 1. This means
+that we calculate alpha like so:
+
+$$\alpha = \frac{f(x=2 | \theta^*)}{f(x=2 | \theta_i)}$$
+
+Interestingly enough, since q is deterministic, so is alpha. It only depends on
+What we propose the new theta to be.
+
+|proposed theta|$\alpha$|action|
+|---|---|---|
+|fair|1.574|always accept|
+|loaded|0.635|accept with propbability 0.635|
+
+This means that we have generated the markov chain that we expected to. We can
+then check this markov chain's stationary distribution.
+
+## Coding the solution
+
+
+
+```{r}
+
+fx <- function(X, theta){
+  if(theta == 0){
+    return((0.4)*(.5^5))
+  }else{
+    return((0.6)*(.7^X)*(.3^(5-X)))
+  }
+}
+
+calculate_alpha <- function(theta_old, theta_new){
+  return((fx(X=2, theta=theta_new))/(fx(X=2, theta=theta_old)))
+}
+```
+
+We can test that these functions are working as intended
+
+```{r}
+for(i in 0:1){
+  new <- i
+  old <- 1 - new 
+  
+  print(calculate_alpha(theta_new = new, theta_old = old))
+}
+```
+
+We can see above that when the coin is fair, we get an alpha of `1.574704`, and
+an alpha of `0.63504` when loaded which is the same as what prof. Herbert Lee 
+calculates.
+
+Next, we need to do the sampling...
+
+```{r}
+n_iter <- 100000
+thetas <- numeric(n_iter)
+
+# Init on the first step
+theta_star <- rbern(1, 0.7)
+thetas[1] <- theta_star
+debug <- FALSE
+
+for(i in 2:n_iter){
+  
+  # Propose alternate
+  if (thetas[i-1]==1){
+    theta_star <- 0
+  } else {
+    theta_star <- 1
+  }
+  
+  # Calculate alpha
+  alpha <- calculate_alpha(theta_old = thetas[i-1], theta_new = theta_star)
+  #print(alpha)
+  
+  # Do evaluation
+  if(alpha>1){
+    thetas[i] <- theta_star
+    if(debug){
+      print("Alpha larger than 1, accepting and continuing")
+    }
+  }else if((alpha > 0) & (rbern(1, alpha))){
+    thetas[i] <- theta_star
+    if(debug){
+      print("Alpha accepted by probability and continuing")
+    }
+  }else{
+    thetas[i] <- thetas[i-1]
+    if(debug){
+      print("Test failed, setting last theta and continuing")
+    }
+  }
+}
+
+head(thetas, 10)
+```
+
+Now that we have completed our sampling, we can compare the value we estimated
+with the true value:
+
+```{r}
+print(mean(thetas))
+print(0.388)
+```
+
+We can see that we are quite close to the true number.
+
+We can even consider bootstrapping from our large vector to create a histogram,
+this will show us the credible values for theta.
+
+```{r}
+n_iter <- 1000
+bootstrapped <- numeric(n_iter)
+
+for(i in 1:n_iter){
+  s <- sample(thetas, n_iter)
+  bootstrapped[i] <- mean(s)
+}
+
+hist(bootstrapped)
+abline(v=0.388, col='blue')
+```
+
+We can see above a histogram for the credible values of theta as well as the
+true value with blue. We could even start calculating other statistics such as
+highest density values and things like that.

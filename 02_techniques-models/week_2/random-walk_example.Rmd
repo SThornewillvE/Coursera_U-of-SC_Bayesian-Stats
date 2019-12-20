@@ -23,12 +23,26 @@ $$\mu \sim t(0, 1, 1)$$
 
 Our posterior distribution looks as such,
 
-$$p(\mu|y_1,...,y_n)  \propto \frac{n(\bar{y}\mu - \frac{\mu^2}{2})}{1 + \mu2}$$
+$$ p(\mu|y_1,...,y_n)  \propto \prod_{i=1}^n \left [\frac{1}{\sqrt{2\pi}}e^{\frac{-(y_i-\mu)^2}{2}} \right] \frac{1}{\pi(1+\mu^2)}$$
+
+i.e. We have a product of observations that are I.I.D. normally distributed with a known stadard 
+deviation of 1. We then need to mulitply by the prior, which is the $t(0, 1, 1)$
+
+Note that since we have a product, we can think about looking at the log likelihood, which will 
+turn the product into a sum.
+
+We can also drop the proportionality constants since we are only looking at what our posterior is proportional to.
+
+$$ e^{-.5 \sum(y_i-\mu)^2} * \frac{1}{1+\mu^2}$$
+
+$$p(\mu|y_1,...,y_n)  \propto \frac{n(\bar{y}\mu - \frac{\mu^2}{2})}{1 + \mu^2}
+$$
 
 In order to make our calculations numerically stable, we will be sampling from the log-posterior distribution, i.e.
 
 $$log[p(\mu|y_1,...,y_n)]  \propto n(\bar{y}\mu - \frac{\mu^2}{2}) - log(1 + \mu^2)$$
 
+The equation above is our g(theta) for the metropolis hastings algorithm.
 
 ## Instantiate Functions
 
@@ -52,13 +66,14 @@ mh <- function(n, ybar, n_iter, mu_init, cand_sd) {
   lg_now <- lg(mu=mu_now, n=n, ybar=ybar)
   
   for (i in 1:n_iter) {
+    # Note that our candidate distribution, q(theta), is normally distributed
     mu_cand <- rnorm(1, mean=mu_now, sd=cand_sd)
     
     lg_cand <- lg(mu=mu_cand, n=n, ybar=ybar)
     lalpha <- lg_cand - lg_now
     alpha <- exp(lalpha)
     
-    u <- runif(1)
+    u <- runif(1)  # Read this as rv from unif(orm)
     if (u < alpha){
       mu_now <- mu_cand
       accpt <- accpt + 1
@@ -70,7 +85,6 @@ mh <- function(n, ybar, n_iter, mu_init, cand_sd) {
   
   list(mu=mu_out, accpt=accpt/n_iter)
 }
-
 
 ```
 
@@ -92,6 +106,7 @@ hist(y, freq=FALSE, xlim=c(-1.0, 3.0))
 points(y, rep(0.0, n))
 points(ybar, 0.0, pch=19)
 curve(dt(x, df=1), lty=2, add=TRUE)
+
 ```
 
 We can see above the histrogram of our observed values, y. We can also see with the dotted lines the curve for our prior 
@@ -116,6 +131,10 @@ traceplot(as.mcmc(post$mu))
 
 We can see that our acceptance rate is relatively low at roughly 10% and that the trace has a hard time converging on 
 the correct value for mu because the step size is too big.
+
+Note that our candidate generating distribution is normally distributed, this is how we are
+exploring the space. If we change the std. of this distribution then we change how quickly we
+are searching through it.
 
 ```{r}
 post <- mh(n=n, ybar=ybar, n_iter=1e3, mu_init = 0.0, cand_sd = 0.05)

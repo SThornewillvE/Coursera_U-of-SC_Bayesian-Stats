@@ -1,0 +1,320 @@
+---
+title: "Bayesian Linear Regression"
+author: "Simon Thornewill von Essen"
+date: "12/22/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("car")
+library("rjags")
+library("coda")
+
+data("Leinhardt")
+```
+
+In this R Markdown we will be doing some bayesian linear regression.
+
+We will be doing a regression of the infant mortality rate in various countries.
+
+```{r}
+head(Leinhardt, 5)
+```
+
+```{r}
+str(Leinhardt)
+```
+
+We can have a look at the scatterplot for this data using the pairs function, as before.
+
+```{r}
+pairs(Leinhardt)
+```
+
+If we were doing a regression on only infant mortality and income, we would imagine that the linear model might not be
+an appropriate choice. However, since both variables have considerable right skewness, we could consider taking the log
+transform of both.
+
+```{r}
+Leinhardt$loginfant <- log(Leinhardt$infant)
+Leinhardt$logincome <- log(Leinhardt$income)
+
+plot(loginfant ~ logincome, data=Leinhardt)
+```
+
+We could easily imagine fitting a straight line through this.
+
+## Modeling
+
+The reference bayesian analysis with a flat prior can be done using the linear model function in R.
+
+```{r}
+lmod <- lm(loginfant ~ logincome, data=Leinhardt)
+
+summary(lmod)
+```
+
+We notice that some observations were omitted due to missing values. We will exclude them  explicitly.
+
+```{r}
+dat <- na.omit(Leinhardt)
+```
+
+### Using JAGS
+
+Now that we have had a look at a bayesian linear regression using uninformative/flat priors, let's take a look at how we
+might build something in JAGS
+
+```{r}
+mod1_string = "model{
+  for(i in 1:n){
+    y[i] ~ dnorm(mu[i], prec)
+    mu[i] <- b[1] + b[2]*log_income[i]
+  }
+  
+  for(j in 1:2){
+     b[j] ~ dnorm(0.0, 1/1.0e6)
+  }
+  
+  prec ~ dgamma(5.0/2, 5.0*10/2)
+  sig2 <- 1/prec
+  sig <- sqrt(sig2)
+}"
+```
+
+Now we need to define a couple of other things for our model.
+
+```{r}
+set.seed(72)
+
+data1_jags <- list(y=dat$loginfant, 
+                   n=nrow(dat),
+                   log_income=dat$logincome)
+
+params1 <- c("b", "sig")
+
+inits1 <- function(){
+  inits <- list("b"=rnorm(2, 0.0, 100.0), 
+                "prec"=rgamma(1, 1.0, 1.0))
+}
+```
+
+Create the model
+
+
+```{r}
+mod1 <- jags.model(textConnection(mod1_string), 
+                   data=data1_jags, 
+                   inits=inits1, 
+                   n.chains=3)
+
+update(mod1, 1000)
+
+mod1_sim <- coda.samples(model=mod1, variable.names = params1, 5000)
+```
+
+Note that we have three chains, it would be useful to combine them into one chain.
+
+```{r}
+mod1_csim <- do.call(rbind, mod1_sim)
+```
+
+## Post Processing
+
+Now that we have completed sampling from our posterior distribution, we should check for convergence.
+
+```{r}
+plot(mod1_sim)
+```
+
+```{r}
+gelman.diag(mod1_sim)
+```
+
+The gelman diagnostics are pretty close to 1, so we can conclude that we have converged. 
+
+```{r}
+autocorr.diag(mod1_sim)
+```
+
+We can see for the first couple of iterations the autocorrelation was pretty high, so we also want to check our 
+effective sample size.
+
+```{r}
+effectiveSize(mod1_sim)
+```
+
+It seems like our sigma value mixed quite well, not so much so for b1 and b2. Note that our sample size is equal to 
+3*5000=15000, so the effective sample size of the bs leaves something quite to be desired.
+
+```{r}
+summary(mod1_sim)
+```
+
+We can compare these results to what we got from `lmod`, it should be noted that out results are quite similar because
+our priors were still rather uninformative. 
+
+Let's also take a look as the residuals...
+
+```{r}
+lmod0 <- lm(infant ~ income, data=Leinhardt)
+
+plot(resid(lmod0))
+```
+
+We dont want to see any patterns in this data, for the index of the model we plotted the residuals for the model, if the
+data are random when we should see the residuals hovering around one point.
+
+```{r}
+plot(predict(lmod0), resid(lmod0))
+```
+
+Here, we can see that as the prediction gets bigger, we see a downward trend in the residuals until we reach a 
+prediction of roughly 100, where the residuals skyrocket. This should lead us to believe that residuals past 100 violate
+the assumptions of a linear model.
+
+```{r}
+qqnorm(resid(lmod0))
+```
+
+We can also plot the sample quantiles against the theoretical quantiles. If this distribution is normally distributed 
+then we should see a straight line here, but unfortunately the quantiles past roughly 1.5 start to violate this 
+assumption.
+
+Now that we know what are residuals shouldn't look like, we should have a look at the results of our bayesian analysis.
+
+```{r}
+X <- cbind(rep(1.0, data1_jags$n),
+           data1_jags$log_income)
+
+pm_params1 <- colMeans(mod1_csim)
+
+yhat1 <- drop(X %*% pm_params1[1:2])
+resid1 <- data1_jags$y - yhat1
+```
+
+```{r}
+plot(resid1)
+```
+
+```{r}
+plot(yhat1, resid1)
+```
+
+We can build one concern with this plot, namely, that the variance of the residuals slowly increases as the predicted 
+variable increases, and we can see two clear outliers as well.
+
+```{r}
+qqnorm(resid1)
+```
+
+Once again, the data looks alright if it werent for the outliers. Let's have a look at what these are.
+
+```{r}
+head(rownames(dat)[order(resid1, decreasing = TRUE )])
+```
+
+We would now double check the data somehow. If it were found that these datapoints were erronious we could correct them.
+Otherwise, we might be able to find reasons why we can drop them from our dataset because they do not fit what we are
+trying to model.
+
+## Alternative Models
+
+But, what if you decide that you cannot drop these two points. What do you do then?
+
+The first thing you can do is look for explanatory variables, these extra features may help the model to discern between
+outliers a little better.
+
+```{r}
+set.seed(75)
+
+mod2_string = "model{
+  for(i in 1:n){
+    y[i] ~ dnorm(mu[i], prec)
+    mu[i] <- b[1] + b[2]*log_income[i] + b[3]*is_oil[i]
+  }
+  
+  for(j in 1:3){
+     b[j] ~ dnorm(0.0, 1/1.0e6)
+  }
+  
+  prec ~ dgamma(5.0/2, 5.0*10/2)
+  sig2 <- 1/prec
+  sig <- sqrt(sig2)
+}"
+
+data2_jags <- list(y=dat$loginfant, 
+                   n=nrow(dat),
+                   log_income=dat$logincome,
+                   is_oil=as.numeric(dat$oil=="yes"))
+
+params1 <- c("b", "sig")
+
+inits2 <- function(){
+  inits <- list("b"=rnorm(3, 0.0, 100.0), 
+                "prec"=rgamma(1, 1.0, 1.0))
+}
+
+mod2 <- jags.model(textConnection(mod2_string), 
+                   data=data2_jags, 
+                   inits=inits2, 
+                   n.chains=3)
+```
+
+Update the model...
+
+```{r}
+update(mod2, 1000)
+
+mod2_sim <- coda.samples(model=mod2, variable.names = params1, 5000)
+
+mod2_csim <- as.mcmc(do.call(rbind, mod2_sim))
+```
+
+Normally, you should always check if the trace has converged. However, we are skipping this here in the interest of
+time. The teacher for this course assures me that it has indeed converged.
+
+```{r}
+summary(mod2_sim)
+```
+
+There seems to be a positive correlation between infant mortality and oil exportation in a  country. Make sure to note
+that this does not mean there is a causal relationship, just that they have been observed to happen together.
+
+```{r}
+X2 <- cbind(rep(1, data2_jags$n), data2_jags$log_income, data2_jags$is_oil)
+
+pm_params2 <- colMeans(mod2_csim)
+
+y_hat2 <- X2 %*% pm_params2[1:3]
+resid2 <- data2_jags$y - y_hat2
+```
+
+```{r}
+par(mfrow=c(2, 1))
+plot(y_hat2, resid2)
+plot(yhat1, resid1)
+```
+
+We can see that the two outliers are now closer to the bulk of the data. They are still pretty extreme outliers when
+compared to the standard deviation of the data, but it's a start.
+
+### Condering alternate likelihoods
+
+We can still note that the likelihood is a normal distribution, which is not as good at handling outliers as a t
+distribution. We can consider modeling with that instead.
+
+## Comparing models
+
+One final thing to discuss in this markdown is how we can compare models. On example is through 
+`deviance info. criterion` or DIC. 
+
+```{r}
+dic.samples(mod1, n.iter = 1e3)
+dic.samples(mod2, n.iter = 1e3)
+```
+
+We can interpret the deviance as a kind of "loss" of the model, we add a pentalty for adding complexity to the model.
+This means that although we made the model a little more complex but adding this complexity was worth it overall.

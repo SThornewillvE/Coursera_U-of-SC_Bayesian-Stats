@@ -1,0 +1,196 @@
+---
+title: "Bayesian ANOVA (Analysis of Variance)"
+author: "Simon Thornewill von Essen"
+date: "28 1 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("ggplot2")
+library("rjags")
+library("coda")
+
+set.seed(82)
+
+```
+
+In this file, we will be investigating how to implement an ANOVA
+
+To do this, we will have a look at the `PlantGrowth` dataset in R. This dataset contains the results from an experiment that compares weights of plants under a control and two treatment conditions.
+
+```{r}
+# Import Data
+data("PlantGrowth")
+
+head(PlantGrowth, 3)
+
+```
+
+Before we do any modeling, it's always good to have a look at our data. I will be plotting this using `ggplot2` because I want more practice using it.
+
+```{r}
+# Visualise
+ggplot(data = PlantGrowth, aes(x=group, y=weight, fill=group)) +
+  geom_boxplot() + 
+  ggtitle("Distributions of plant weights for each group")
+
+```
+
+We can see that for the two treatments, the first one made the weights lower overall and the second treatment seems to make the weights higher. But you don't know for sure until you do some statistics.
+
+Before we begin modeling, it's also usually a good idea to have a reference analysis to compare with. We can use this using the `lm` function in R.
+
+```{r}
+lmod <- lm(weight ~ group, data=PlantGrowth)
+
+summary(lmod)
+```
+
+In this summary, the intercept represents the posterior mean for the treatment and the other two parameters show the expected change in the intercept for each treatment group.
+
+We can also have a look at the ANOVA table for this dataset.
+
+```{r}
+anova(lmod)
+```
+
+Here, we have the result of the statistical test for each (in this case only one) factor in a dataset and whether this factor contributes a lot to the to the varaibility in the data. (I.e. comparing the variability inside of the group vs outside.)
+
+In this case we get a p-value of beneath 0.05, so we can say that it is marginally significant.
+
+## Building ANOVA in JAGS
+
+Now that we've done some basic analysis, let's try and build this in R.
+
+```{r}
+mod_string = " model {
+    for (i in 1:length(y)) {
+        y[i] ~ dnorm(mu[grp[i]], prec)
+    }
+    
+    for (j in 1:3) {
+        mu[j] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(5/2.0, 5*1.0/2.0)
+    sig = sqrt( 1.0 / prec )
+} "
+
+data_jags <- list(y=PlantGrowth$weight, 
+              grp=as.numeric(PlantGrowth$group))
+
+params <- c("mu", "sig")
+
+inits = function() {
+    inits = list("mu"=rnorm(3,0.0,100.0), "prec"=rgamma(1,1.0,1.0))
+}
+
+mod <- jags.model(textConnection(mod_string), data=data_jags, inits=inits, n.chains=3)
+
+```
+
+Now that our model is initialised, we can update it.
+
+```{r}
+update(mod, 1e3)
+
+
+mod_sim <- coda.samples(model = mod,
+                        variable.names = params,
+                        n.iter = 5e3)
+
+plot(mod_sim)
+```
+
+We can have a look at our trace plots to see if our model has converged, I would say that this isn't looking too bad.
+
+Next, let's have a look at our gelman stats.
+
+```{r}
+gelman.diag(mod_sim)
+```
+
+This is further proof that we have converged and no thinning or anything like that is necessary.
+
+```{r}
+autocorr.diag(mod_sim)
+```
+
+It also looks like autocorrelation isn't a big deal either.
+
+```{r}
+effectiveSize(mod_sim)
+```
+
+The effective sample size is also pretty good, the only value that maybe gives some "concern" is the sigma value.
+
+We can compare our posterior means with the reference we got from our analysis earlier.
+
+```{r}
+mod_csim <- as.mcmc(do.call(rbind, mod_sim))
+
+pm_params <- colMeans(mod_csim)
+
+pm_params
+```
+
+```{r}
+coefficients(lmod)
+```
+
+These results are consistent. (Note that you need to add the coeffs together to get the posterior prediction.)
+
+Now let's try to calculate residuals:
+
+```{r}
+yhat <- pm_params[1:3][data_jags$grp]
+resid <- data_jags$y - yhat
+
+df_resid <- data.frame(yhat=yhat, resid=resid, y=data_jags$y, cat=factor(data_jags$grp))
+
+ggplot(data = df_resid, aes(x=(1:nrow(df_resid)), y=resid)) +
+  geom_point() +
+  ggtitle("Residuals")
+```
+
+There doesnt seem to be a long term trend in the residuals which is good.
+
+```{r}
+ggplot(data = df_resid, aes(x=yhat, y=resid)) +
+  geom_point(aes(color=cat)) +
+  ggtitle("Residuals for each group")
+```
+
+Its worth noting that the residual variance for category 2 is much larger than that for category 2, despite having lower predicted values. This is why having a separate parameter for variance might be a good idea.
+
+Now, let's have a look at our summary of the posterior distribuion.
+
+```{r}
+summary(mod_sim)
+```
+
+We can also have a look at our HPD interval
+
+```{r}
+HPDinterval(mod_csim)
+```
+
+We can see that treatment one does not significantly change the outcome over the control, but the second treatment does.
+
+Whats the probability that it is better given the data?
+
+```{r}
+mean(mod_csim[,3] > mod_csim[,1])
+```
+
+Seems like it's roughly 94%.
+
+What about if this treatment would be costly?, say, 10% more. What percent is bigger than that difference?
+
+```{r}
+mean(mod_csim[,3] > 1.1*mod_csim[,1])
+```
+
+Note: it's best not to explore your data for hypothesis because it can lead to false-positives. Best to have an idea about what questions you want answered *before* your analysis.

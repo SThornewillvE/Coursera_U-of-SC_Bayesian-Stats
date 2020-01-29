@@ -1,0 +1,219 @@
+---
+title: "Bayesian Logistic Regression"
+author: "Simon Thornewill von Essen"
+date: "29 1 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+set.seed(92)
+
+library("ggplot2")
+library("rjags")
+library("coda")
+
+library("boot")
+
+```
+
+In this R Markdown we will be doing some bayesian logistic regression.
+
+This analysis will be done on the urine dataset.
+
+```{r}
+data("urine")
+dat <- na.omit(urine)
+
+head(urine, 3)
+```
+
+We are interested in whether certain physical characteristics of urine might be related to the formation of calcium oxalate crystals (`r`).
+
+```{r}
+pairs(urine)
+```
+
+Note that a lot of observations in this dataset are strongly correlated with each other, this should be taken into consideration when selecting features to use in our model.
+
+It's not a problem if our goal is prediction, but if our goal is interpretation of the estimated parameters then we should avoid having strongly correlated observations as they can compete for influence over the dependant variable.
+
+Note as well that we want to make sure that when we use multiple variables, that they are scaled to be on the same range, this means that variables will have similar influence on the dependant variable.
+
+```{r}
+X <- scale(dat[,-1], center=TRUE, scale=TRUE)
+
+head(X, 3)
+```
+
+Note that we want to use a prior for each parameter that also punishes large values, encouraging smaller ones. This is done by using a double exponential distribution.
+
+```{r}
+ddexp <- function(x, mu, tau) {
+  0.5*tau*exp(-tau*abs(x-mu))
+}
+
+curve(ddexp(x, 0.0, 1.0), from = -5, to = 5.0, ylab="density")
+curve(dnorm(x, 0.0, 1.0), from = -5, to = 5.0, lty=2,add = TRUE)
+legend("topright", legend=c("double exp.", "norm."), lty = c(1, 2), bty = "n")
+```
+
+First, let's build our model string.
+
+```{r}
+mod1_string <-" model{
+    for (i in 1:length(y)) {
+      y[i] ~ dbern(p[i])
+      
+      logit(p[i]) = int + b[1]*gravity[i] + b[2]*ph[i] +
+        b[3]*osmo[i] + b[4]*cond[i] + b[5]*urea[i] + b[6]*calc[i]
+    }
+    
+    int ~ dnorm(0.0, 1.0/25.0)
+    for (j in 1:6){
+      b[j] ~ ddexp(0.0, sqrt(2.0)) # has variance 1.0
+    }
+  }"
+
+data_jags <- list(y=dat$r, gravity=X[,"gravity"], ph=X[,"ph"],
+                  osmo=X[,"osmo"], cond=X[,"cond"], urea=X[,"urea"], calc=X[,"calc"])
+
+params <- c("int", "b")
+
+mod1 <- jags.model(textConnection(mod1_string), data=data_jags, n.chains=3)
+
+update(mod1, 1e3)
+
+mod1_sim <- coda.samples(model = mod1, variable.names = params, n.iter = 5e3)
+mod1_csim <- as.mcmc(do.call(rbind, mod1_sim))
+```
+
+```{r}
+summary(mod1_sim)
+```
+
+
+```{r}
+dic1 = dic.samples(mod1, n.iter = 1e3)
+
+dic1
+```
+
+```{r}
+par(mfrow=c(3, 2))
+densplot(mod1_csim[,1:6], xlim=c(-3, 3))
+# colnames(X)
+```
+
+Above we are interested in finding out in the distributions of the parameters in the logistic regression differ meaningfully from zero. 
+
+b1, b4 and b6 are all meaningfully away from zero, while b3 and b2 still look similar to our prior distributions and lie above zero, so we can conclude that they do not change in a meaningful way. b5 looks borderline, but it is correlated with b1 so we will be removing it in subsequent analyses.
+
+```{r}
+mod2_string = " model {
+    for (i in 1:length(y)) {
+        y[i] ~ dbern(p[i])
+        logit(p[i]) = int + b[1]*gravity[i] + b[2]*cond[i] + b[3]*calc[i]
+    }
+    int ~ dnorm(0.0, 1.0/25.0)
+    for (j in 1:3) {
+        b[j] ~ dnorm(0.0, 1.0/25.0) # noninformative for logistic regression
+    }
+} "
+
+mod2 <- jags.model(textConnection(mod2_string), data=data_jags, n.chains=3)
+
+update(mod2, 1e3)
+
+mod2_sim <- coda.samples(model = mod2, variable.names = params, n.iter = 5e3)
+mod2_csim <- as.mcmc(do.call(rbind, mod2_sim))
+```
+
+```{r}
+dic2 <- dic.samples(mod2, n.iter = 1e3)
+
+dic1
+
+dic2
+```
+
+When we compare the DIC for both of the models, it seems that the second model has a higher penalty than the first one
+
+```{r}
+par(mfrow=c(3, 1))
+densplot(mod2_csim[,1:3], xlim=c(-3, 3))
+```
+
+```{r}
+summary(mod2_sim)
+```
+
+It seems from these analyses that sodium concentration(b3) has the highest association with urine crystals
+
+
+## Predictions
+```{r}
+
+```
+
+Now that we have estimations for our parameters, we want to take a look at how we might make predictions using this.
+
+Since we know the equation to use to make predictions, we just use these parameters and plug in different values of X to find our predictions
+
+```{r}
+pm_coef <- colMeans(mod2_csim)
+
+pm_coef
+```
+
+```{r}
+1.0 / (1.0 + exp(-(pm_coef[4])))
+```
+
+Thus, the probability of having urine crystals for average values for the b vector is roughly 46%
+
+If we consider having b2 being 1 sd below and b3 as being 1 sd above the mean, then we need to change our calculations as follows.
+
+```{r}
+1.0 / (1.0 + exp(-(pm_coef[4] + pm_coef[2]*(-1) + pm_coef[3]*1)))
+```
+
+We can se we have a very high, 95.5 probability of conversion.
+
+So, now let's predict the values for our observations below.
+
+```{r}
+pm_Xb <- pm_coef["int"] + X[,c(1, 4, 6)] %*% pm_coef[1:3]
+
+phat <- 1.0 / (1.0 + exp(-pm_Xb))
+head(phat, 3)
+```
+
+We can visualise our results below, take care that the y axis is still 1s and 0s, but adding jitter helps to see the distributions more clearly.
+
+```{r}
+plot(phat, jitter(dat$r))
+```
+
+We can construct a confusion matrix in order to evaluate performance further
+
+```{r}
+tab0.5 <- table(phat > 0.5, dat$r)
+
+tab0.5
+```
+
+```{r}
+acc <- (38 + 21) / (38 + 21 + 12 + 6)
+prec <- (21) / (21 + 6)
+rec <- (21) / (21 + 12)
+  
+acc
+prec
+rec
+```
+
+Luckily, it seems like this dataset was not very imbalanced, so precision and recall metrics arent so important here. But we can see that the model performes generally well, with an accuracy of roughly 76%.
+
+Note that we can choose different thresholds in the case that false positives or negatives are something we want to avoid. 

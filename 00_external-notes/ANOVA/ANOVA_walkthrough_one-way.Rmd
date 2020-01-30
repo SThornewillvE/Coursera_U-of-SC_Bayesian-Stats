@@ -1,0 +1,250 @@
+---
+title: "Frequentist ANOVA - One Way"
+author: "Simon Thornewill von Essen"
+date: "30 1 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("ggplot2")
+library("reshape2")
+
+```
+
+
+# Introduction to Analysis of Variance (ANOVA)
+
+In the bayesian stats course, we do a Bayesian ANOVA test. It can be difficult to understand what is going on if you do not understand frequentist ANOVA first. 
+
+This R markdown file will walk you through what the ANOVA is.
+
+
+# One way ANOVA
+
+First, let's create our dataset.
+
+```{r}
+# Create dataset
+df <- data.frame(red = c(3, 2, 1),
+                 green = c(5, 6, 7),
+                 blue = c(5, 3, 4))
+
+df
+
+```
+
+We can visualise our dataset as follows:
+
+```{r}
+df_melt <- melt(df)
+
+ggplot(data = df_melt, aes(x=variable, y=value, fill=variable)) + 
+  geom_boxplot()
+
+```
+
+
+We can see here that we have three samples for different treatments of a test. i.e. Red, blue, green. And there seems to be quite some variation between the groups. 
+
+Loosely, we want to know if this "grouping" is "meaningful". Our definition of meaningful is whether there is at least one group inside of our grouping that is different in a statistically significant way.
+
+We do this using an ANOVA (analysis of variance) test. Where the null hypothesis is that there is no difference between the means of the groups and the alternative hypothesis is that there is at least one inequality between the means.
+
+In order to do this, we need to consider the variance between in total, between the groups and within the groups. These are related to each other as such;
+
+$$SST = SSB + SSW$$
+
+Where `SST` is the total variance of the dataset, `SSB` is the variance between the groups and `SSW` is the variance within a group.
+
+We then use this, as well as the degrees of freedom (DoF) for each of these statistics (which are $\chi^2$ distributed, see $\chi^2$ testing) to calculate an F statistic, which we then compare to a critical value from the F distribution using the two DoFs as parameters for said distribution. 
+
+## Calculating Sum of Squares
+
+### Calculating Total SS (SST)
+
+To calculate the total sum of squares, we simply consider our dataframe/matrix to be a list. We then want to take the variance of this list
+
+```{r}
+SST_value <- sum((df_melt$value - mean(df_melt$value))^2)
+
+SST_value
+
+```
+
+The DoF of this calculation is simply the number of observations minus 1.
+
+```{r}
+SST_dof <- length(df_melt$value) - 1
+
+SST_dof
+
+```
+
+Let's wrap this into a function for later reference:
+
+```{r}
+ SST <- function(df){
+  df_melt <- melt(df)
+  
+  SST_value <- sum((df_melt$value - mean(df_melt$value))^2)
+  
+  SST_dof <- length(df_melt$value) - 1
+  
+  return(list(SST_value=SST_value, SST_dof=SST_dof))
+ }
+
+SST(df)
+```
+
+
+### Calculating Within SS (SSW)
+
+After calculating SST, we want to calculate SSW. To do that we calculate the sum of squares within each group relative to that groups mean. The dof for that mean will be $n-1$ and since we do that $m$ times, the total dof for the SSW is going to be $m(n-1)$.
+
+```{r}
+SSW_value <- sum((df - t(matrix(colMeans(df), nrow=3, ncol=3)))^2)
+
+SSW_dof <- length(df) * (nrow(df) - 1)
+
+SSW_value
+SSW_dof
+```
+
+Once again, wrap this into a function
+
+```{r}
+SSW <- function(df){
+  SSW_value <- sum((df - t(matrix(colMeans(df), nrow=3, ncol=3)))^2)
+
+  SSW_dof <- length(df) * (nrow(df) - 1)
+  
+  return(list(SSW_value=SSW_value, SSW_dof=SSW_dof))
+}
+
+SSW(df)
+
+```
+
+
+### Calculating Between SS (SSB)
+
+Finally, we calculate the variance between the groups. To do this we take the means of each group and compare it with grand mean. Since we are using only the aggregate mean for each group to calculate this statistic, the dof is $m-1$.
+
+```{r}
+means <- colMeans(df)
+
+m <- length(means)
+
+SSB_value <- sum(m*((colMeans(df) - mean(means))^2))
+
+SSB_dof <- m - 1
+
+SSB_value
+SSB_dof
+
+```
+
+```{r}
+SSB <- function(df){
+  means <- colMeans(df)
+  
+  m <- length(means)
+  
+  SSB_value <- sum(m*((colMeans(df) - mean(means))^2))
+  
+  SSB_dof <- m - 1
+  
+  return(list(SSB_value=SSB_value, SSB_dof=SSB_dof))
+}
+
+SSB(df)
+```
+
+Note that we can double check this by checking that $SSW + SSB$ is equal to $SST$.
+
+```{r}
+SST_value == SSW_value  + SSB_value
+```
+
+
+## Calculating F statistics
+
+Now that we have calculated our statistics, we want to compare the variance between the groups to the variance within the groups, divided by their degrees of freedom. This will create a random variable that is drawn from an F distribution, as mentioned before.
+
+```{r}
+fstat <- function(df){
+  SSB_value <- SSB(df)$SSB_value
+  SSB_dof <- SSB(df)$SSB_dof
+  SSW_value <- SSW(df)$SSW_value
+  SSW_dof <- SSW(df)$SSW_dof
+  
+  return(SSB_value/SSB_dof)/(SSW_value/SSW_dof)  # Dividing two Chi-sq. RVs to get a F RV
+}
+  
+fs <- fstat(df)
+
+fs
+
+```
+
+Next, we want to compare this statistic with a critical value, we do this by taking the degrees of freedom and 
+
+```{r}
+x <- seq(0, 15, 0.1)
+f_pdf <- df(x, SSB_dof, SSW_dof)
+
+plot(x, f_pdf, type="l")
+abline(v=12, col="darkblue")
+
+```
+
+So, what we want to know is what is the probability of finding a statistic this extreme or more? 
+
+```{r}
+fcrit <- 1 - pf(12, 2, 6)
+
+fcrit
+
+
+```
+
+If our alpha level is the typical `0.05`, then we can compare them as such.
+
+```{r}
+alpha <- 0.05
+
+fcrit <= alpha
+
+```
+
+Thus we can reject the null hypothesis and accept the hypothesis that there is ALOI in the data.
+
+Let's wrap this all into our final function
+
+```{r}
+f_test <- function(df, alpha=0.05){
+  fs <- fstat(df)
+  SSB_dof <- SSB(df)$SSB_dof
+  SSW_dof <- SSW(df)$SSW_dof
+  
+  fcrit <- 1 - pf(fs, SSB_dof, SSW_dof)
+  
+  return(list(reject_null=(fcrit < alpha), pval=1 - pf(fs, SSB_dof, SSW_dof)))
+}
+
+f_test(df)
+```
+
+## Conclusion
+
+In R-markdown, we introduced the one way ANOVA hypothesis test and created functions for future use. The key to the ANOVA is understanding that it is a test that describes whether the grouping is "meaningful". By comparing the variances between and within groups relative to their degrees of freedom, we create a random variavle drawn from an F distribution. We can see where the statistic lies on this distribution to get a p-value and compare this with our alpha value to see whether our result is statistically significant.
+
+Ultimately, we don't need to do this by hand, we can simply use the inbuilt test
+
+```{r}
+aow <- aov(value ~ variable, data = df_melt)
+summary(aow)
+
+```

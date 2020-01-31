@@ -1,0 +1,182 @@
+---
+title: "Frequentist ANOVA - Two Way Without Repliation"
+author: "Simon Thornewill von Essen"
+date: "30 1 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("car")
+library("reshape2")
+```
+
+## Introduction to Two Way ANOVA
+
+This R-markdown file follows on from the one-way analysis that was done.
+
+We already considered the one-way ANOVA, but one thing that it does not take into account is the variance within rows. Since this is not considered, it gets absorbed by the "error" term. But, this means that the error is larger than it could be. Two-way ANOVA is meant to account for this.
+
+```{r}
+# Create Dataset
+df <- data.frame("A"=c(75, 70, 50, 65, 80, 65),
+                 "B"=c(75, 70, 55, 60, 65, 65),
+                 "C"=c(90, 70, 75, 85, 80, 65))
+
+```
+
+## Two-way ANOVA without replication
+
+### Calculating parameters
+
+In the last analysis we used the equation $SST = SSB + SSW$, but now I'm following a different tutorial so these are going to be renamed to $SST = SSC + (SSR + SSE)$. What used to be the error term is now separated into a smaller error term and the sum of squared error withing the rows, the squared error between the groups is now signifief by SSC (refering to columns).
+
+Obviously, the total error, the column error are the same as before. The row error is the same as the column error, except the matrix gets transposed, so we'll import those functions from last time.
+
+```{r}
+ SST <- function(df){
+  df_melt <- melt(df, measure.vars=c("A", "B", "C"))
+  
+  SST_value <- sum((df_melt$value - mean(df_melt$value))^2)
+  
+  SST_dof <- length(df_melt$value) - 1
+  
+  return(list(SST_value=SST_value, SST_dof=SST_dof))
+ }
+
+SSC <- function(df, cols=TRUE){
+  if(cols != TRUE){
+   SSC_dof <- nrow(df) - 1
+   
+   df <- t(df)
+  }else{
+    SSC_dof <- nrow(t(df)) - 1
+  }
+  
+  means <- colMeans(df)
+  
+  m <- nrow(df)
+  
+  SSC_value <- m * sum((colMeans(df) - mean(means))^2)
+  
+  return(list(SSC_value=SSC_value, SSC_dof=SSC_dof))
+}
+
+SST(df)
+SSC(df)
+SSC(df, cols=FALSE)
+
+```
+
+Now, the only issue is getting the sum of squares for the error term, this can be done by simply reqrrangint the eqution above:
+
+$$SSE = SST - SSC - SSR$$
+
+But what about the degrees of freedom? In order to calculate the degrees of freedom we need to calculate $(C - 1)(R - 1)$.
+
+Note to self: Study more into degrees of freedom.
+
+```{r}
+SSE <- function(df){
+  SST_value <- SST(df)$SST_value
+  SSC_value <- SSC(df)$SSC_value
+  SSR_value <- SSC(df, cols=FALSE)$SSC_value
+  
+  SSE_value <- SST_value - SSC_value - SSR_value
+  
+  SSE_dof <- (ncol(df) - 1) * (nrow(df) - 1)
+  
+  return(list(SSE_value=SSE_value, SSE_dof=SSE_dof))
+}
+
+SSE(df)
+```
+
+Great! So now we have all of the statistics we need to calculate a two way ANOVA.
+
+### Calculating F Statistics
+
+As before, we want to calculate our new F statistic. Except instead of just calculating one F statistic, we calculate two. Comparing the mean square error in the rows AND the columns to the error respectively. 
+
+```{r}
+fstat <- function(df, cols=TRUE){
+  
+  MSC <- SSC(df, cols)$SSC_value / SSC(df, cols)$SSC_dof
+  MSE <- SSE(df)$SSE_value / SSE(df)$SSE_dof
+  
+  return(MSC/MSE)  # Dividing two Chi-sq. RVs to get a F RV
+}
+  
+fs_col <- fstat(df, cols=TRUE)
+fs_row <- fstat(df, cols=FALSE)
+  
+fs_col
+fs_row
+```
+
+So, now we have our test values to compare with an $F_{crit}$ statistic.
+
+```{r}
+f_test_2w <- function(df, alpha=0.05){
+  fs_col <- fstat(df, cols=TRUE)
+  
+  SSC_dof <- SSC(df)$SSC_dof
+  SSE_dof <- SSE(df)$SSE_dof
+  
+  fcrit_cols <- 1 - pf(fs_col, SSC_dof, SSE_dof)
+  
+  alpha_crit <- qf(alpha, SSC_dof, SSE_dof, lower.tail = FALSE)
+  
+  df.return <- data.frame("is_significant"=c(fcrit_cols < alpha_crit),
+                          "test_stat"=c(fs_col),
+                          "crit_stat"=c(alpha_crit),
+                          "p_values"=c(fcrit_cols))
+  
+  return(df.return)
+}
+
+f_test_2w(df)
+
+```
+
+It took some time for me to figure this out, but finally we get the right numbers. We can see that our test statistic his higher than the critical value, which means that it is more unlikely. We can also see that the p-value is beneath the alpha which means we can reject the null hypothesis.
+
+Ofcourse, we can also just do this normally in R. Take special care to convert numeric values to factors or else R will not be able to interpret them properly.
+
+```{r}
+df.for_melt <- df
+df.for_melt <- cbind(df.for_melt, as.data.frame(seq(1:6), ncol=1, nrow=6))
+colnames(df.for_melt) <- c("A", "B", "C", "shopper_num")
+
+df.melt <- melt(df.for_melt, 
+                id.vars = c("shopper_num"), 
+                measure.vars = c("A", "B", "C"),
+                )
+
+colnames(df.melt) <- c("shopper_num", "location", "rating")
+df.melt[,'shopper_num']<-factor(df.melt[,'shopper_num'])
+
+df.melt
+
+
+atw <- lm(rating ~ location + shopper_num, data=df.melt)
+Anova(atw, type="II")
+
+#summary(atw)
+```
+
+You can also do it like this.
+
+```{r}
+atw <- aov(rating ~ location + shopper_num, data=df.melt)
+summary(atw)
+```
+
+## Conclusion
+
+Believe it or not, it took me a long time to figure out how to calculate these last couple of steps. It was worth it through, I understand ANOVA, one way and two way far better now.
+
+The main difference between the two is that we take more things into account. However, when we look at the "linear model" interpretation, we can see that we just take multiple variables into consideration. It's tutles all the way down, and we could consider using other factors as well in our analysis.
+
+In the next R-markdown, we will consider the two day ANOVA with replacement, which uses a vector of observations for each cell creating a tensor.

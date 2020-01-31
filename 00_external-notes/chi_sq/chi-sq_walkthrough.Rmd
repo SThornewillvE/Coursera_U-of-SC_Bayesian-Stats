@@ -1,0 +1,125 @@
+---
+title: "Chi Squared Test"
+author: "Simon Thornewill von Essen"
+date: "31 1 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("ggplot2")
+library("data.table")
+
+```
+
+This course on bayesian analysis has a section on ANOVA testing, which uses F distributions. F statistics are random variables that are created from dividing two other random variables drawn by $\chi^2$ distributions while dividing their degrees of freedom.
+
+Given that we touch on the topic of $\chi^2$ distributions and since I am also not so comfortable with $\chi^2$ tests, I thought it would also be a good idea to go through that here.
+
+```{r}
+# Create dataset
+df <- data.frame("student_type"=c("Freshman", "Sophomore", "Junior", "Senior", "Unclassified"),
+                 "year_2007"=c(560, 369, 209, 267, 64),
+                 "year_2008"=c(495, 385, 226, 277, 70),
+                 "year_2009"=c(553, 358, 248, 304, 93),
+                 "year_2010"=c(547, 361, 268, 328, 77),
+                 "year_2011"=c(512, 393, 285, 340, 126))
+
+df
+
+```
+
+When we are doing $\chi^2$ tests, we need to subtract the observed values with expected values. The issue is, how do we get our expected values?
+
+To do this, we need to calculate our marginal sums and then fill in each cell with the marginal total of both axis divided by the total of all counts inside the dataset.
+
+Note that we have the following hypotheses:
+
+* $H_0$: The categorical vars are independent
+* $H_1$: The categorical vars are ~independent
+
+Calculating this in R is pretty easy.
+
+```{r}
+# Calculating relevant sums
+col.sum <- colSums(df[, -1])
+
+row.sum <- rowSums(df[, -1])
+
+n <- sum(sum(df[, -1]))
+
+```
+
+Next, we want to create our relevant matrix.
+
+```{r}
+matrix.expected <- matrix(0, nrow = nrow(df[,-1]), ncol = ncol(df[,-1]))
+
+for(i in 1:nrow(df[,-1])){
+  for(j in 1:ncol(df[,-1])){
+    matrix.expected[i, j] <- row.sum[i]*col.sum[j]/n
+  }
+}
+
+matrix.expected
+
+```
+
+Great, now we can find our squared differences normalised by our expected values. Note that if we do not normalise our values then our $\chi^2$ test value will be dependent on the magnitude of the vectors of data in our dataset, we want to make this as generalisable as possible.
+
+```{r}
+matrix.obs <- as.matrix(df[, -1])
+
+matrix.stats <- ((matrix.obs - matrix.expected)^2)/matrix.expected
+
+matrix.stats 
+```
+
+Next, we need to calculate our chi square critical value.
+
+Note that we have n observations and m columns, each of these has their own degrees of freedom and we multiply them together to get the total degrees of freedom. (Once again, it might be worth revising degrees of freedom as well.)
+
+```{r}
+alpha <- 0.05
+dof <- (nrow(df[,-1])-1) * (ncol(df[,-1])-1)
+
+chisq.crit <- qchisq(alpha, dof, lower.tail = FALSE)
+
+chisq.crit
+```
+
+Now that we have our critical value, we now want to calculate our test/stat value. The test value will simply be the grand sum of all of the values in `matrix.stats `
+
+```{r}
+chisq.stat <- sum(matrix.stats)
+
+chisq.stat
+```
+
+We get a value much larger than our critical value, so we will be able to reject our null hypothesis. (Insert null hypothesis here.)
+
+We should also get our p-value for fun...
+
+```{r}
+pchisq(chisq.stat, dof, lower.tail = FALSE)
+```
+
+We can see that our p-value is very small, which means we can reject our null hypothesis. This leads us to conclude that there is a relationship between these variables. i.e. The difference between the expected and observed frequencies are not minor enough to be within what we may expect due to chance alone.
+
+Given that our dataset was about student counts per type of student over time, we should expect to see some kind of pattern in there.
+
+Finally, let's see how we can do this test in R without needing to do the calculation by hand.
+
+```{r}
+chisq.test(x=matrix.obs)
+```
+
+It's good to replicate what we do with build in functions in R, we seem to have carried out the correct procedure.
+
+## Conclusion
+
+$\chi^2$ tests are for figuring out whether there is a difference between categorical variables in a dataset, especially for independence. If we are able to reject the null hypothesis, then we will be able to conclude that there is a relationship between the categorical variables.
+
+It should be noted that these tests are carried out with count data instead of continuous data. For continuous data we tend to use z, t, anova tests as well as regression.
+

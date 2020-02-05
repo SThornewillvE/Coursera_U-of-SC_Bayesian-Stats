@@ -1,0 +1,204 @@
+---
+title: "Heirarchical Models"
+author: "Simon Thornewill von Essen"
+date: "4 2 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+set.seed(113)
+
+library("rjags")
+library("coda")
+```
+
+Get data
+
+```{r}
+dat <- read.table(file="cookies.dat", header=TRUE)
+```
+
+```{r}
+boxplot(chips ~ location, data=dat)
+```
+
+## Setting priors
+
+When it comes to prior models, we need to make sure to choose good values.
+
+We can take a guess at priors and follow them down the heirarchical model to see where they lead.
+
+Remember that the heirarchical model looks as follows:
+
+$$ y_{i, j} \sim Pois(\lambda_j), (i=1, ..., 30), (j=1,...,5) \\
+   \lambda_j |\alpha, \beta \sim Gamma(\alpha, \beta), (j=1,...,5) \\
+   \alpha \sim p(\alpha), \beta \sim p(\beta)
+   $$
+
+As I said, we can pick our priors. What do these priors represent? Well, notice that they get used as parameters for the gamma distribution. The alphas and betas control the rates for the chocolate chips inside of the cookies. Where $\alpha$ represents the mean for all cookeies and $\beta$ represents the variance.
+
+```{r}
+n_sim <- 500
+
+alpha_pri <- rexp(n_sim, rate=1.0/2.0)
+beta_pri <- rexp(n_sim, rate=5.0)
+```
+
+Now that we have random values for alpha and beta, let's have a look at what our values for lambda would look like.
+
+```{r}
+mu_pri <- alpha_pri / beta_pri
+sig_pri <- sqrt(alpha_pri / beta_pri^2)
+
+summary(mu_pri)
+summary(sig_pri)
+```
+
+We get a median with the expected number of chips per cookie, but it should be noted that the distribution is heavily right skewed, as we can see when comparing the median and the mean.
+
+Now, let's draw the lambdas
+
+```{r}
+lam_pri <- rgamma(n_sim, shape=alpha_pri, rate=beta_pri)
+
+summary(lam_pri)
+```
+
+So can see this carried forward. Note that if we wanted to reign the skewness in, we would tinker with our priors until we got something that we are happy with.
+
+```{r}
+y_pri <- rpois(n_sim, lam_pri)
+
+summary(y_pri)
+```
+
+If we wanted to try and recreate our dataset, we should just keep five of these lambda priors
+
+```{r}
+lam_pri <- lam_pri[1:5]
+y_pri <- rpois(150, lambda = rep(lam_pri, each=30))
+
+hist(y_pri)
+```
+
+## Create Jags Model
+
+```{r}
+mod1_string <- "model{
+  for(i in 1:length(chips)){
+    chips[i] ~ dpois(lam[location[i]])
+  }
+  
+  for(j in 1:max(location)){
+    lam[j] ~ dgamma(alpha, beta)
+  }
+  
+  mu ~ dgamma(2.0, 1.0/5.0)
+  sig ~ dexp(1.0)
+  
+  alpha = mu^2/sig^2
+  beta = mu / sig^2
+}"
+
+data1_jags <- as.list(dat)
+
+params1 <- c("lam", "mu", "sig")
+
+mod1 <- jags.model(textConnection(mod1_string), data=data1_jags, n.chains=3)
+update(mod1, 1e3)
+
+mod1_sim <- coda.samples(model=mod1, variable.names=params1, n.iter=5e3)
+mod1_csim <- as.mcmc(do.call(rbind, mod1_sim))
+
+plot(mod1_sim, ask=TRUE)
+
+```
+
+```{r}
+dic1 <- dic.samples(mod1, 1e3)
+
+dic1
+```
+
+## Model Checking
+
+Now that we have our model, we want to evaluate the residuals.
+
+```{r}
+pm_params <- colMeans(mod1_csim)
+
+pm_params
+
+```
+
+```{r}
+yhat <- rep(pm_params[1:5], each=30)
+resid <- dat$chips - yhat
+
+plot(resid)
+```
+
+These residuals look good, no patterns are seen here.
+
+```{r}
+plot(jitter(yhat), resid)
+```
+
+The same for these ones. We might think that the variance is increasing as the prediction increases, but that's becuase in a poisson model the variance is proportional to the mean.
+
+One thing that we can check is that for each strata the variance is similar to the predicted values.
+
+```{r}
+var(resid[yhat > 11])
+```
+
+## Posterior Predictive Simulations
+
+Analogous to the prior predictive simulations, we can take draws from our posterior distributions to do a similar kind of analysis.
+
+```{r}
+n_sim <- nrow(mod1_csim)
+
+post_alpha <- mod1_csim[,"mu"]^2/mod1_csim[,"sig"]^2 
+post_beta <-  mod1_csim[,"mu"]/mod1_csim[,"sig"]^2 
+
+lam_pred <- rgamma(n_sim, shape=post_alpha, rate=post_beta)
+
+hist(lam_pred)
+```
+
+We can even get the probability that the lamda is higher than some value.
+
+```{r}
+mean(lam_pred > 15)
+```
+
+```{r}
+y_pred <- rpois(n_sim, lambda = lam_pred)
+
+hist(y_pred)
+```
+
+```{r}
+mean(y_pred > 15)
+```
+
+```{r}
+hist(dat$chips)
+```
+
+We can see that our distribution and our posterior distribution are pretty similar. 
+
+We can answer other questions too "what is the posterior prob that the next cookie produced at loc. 1 has fewer than 7 chips?
+
+```{r}
+y_pred1 <- rpois(n_sim, lambda = mod1_csim[,"lam[1]"])
+
+hist(y_pred1)
+```
+
+```{r}
+mean(y_pred1 < 7)
+```

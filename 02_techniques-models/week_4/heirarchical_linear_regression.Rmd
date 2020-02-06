@@ -1,0 +1,85 @@
+---
+title: "Heirarchical Linear Regression"
+author: "Simon Thornewill von Essen"
+date: "6 2 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("car")
+library("rjags")
+library("coda")
+
+set.seed(116)
+```
+
+Let's try and do a heirarchical model on the Leinhardt data, which is a dataset about infant mortality.
+
+```{r}
+data("Leinhardt")
+
+dat <- na.omit(Leinhardt)
+
+dat$logincome <- log(dat$income)
+dat$loginfant <- log(dat$infant)
+```
+
+```{r}
+mod1_string <- "model{
+  for(i in 1:length(y)){
+    y[i] ~ dnorm(mu[i], prec)
+    mu[i] = a[region[i]] + b[1]*log_income[i] + b[2]*is_oil[i]
+  }
+  
+  for(j in 1:max(region)){
+    a[j] ~ dnorm(a0, prec_a)
+  }
+  
+  a0 ~ dnorm(0.0, 1.0/1.0e6)
+  prec_a ~ dgamma(1/2.0, 1*10.0/2.0)
+  tau = sqrt(1.0 / prec_a)
+  
+  for(j in 1:2){
+    b[j] ~ dnorm(0.0, 1.0/1.0e6)
+  }
+  
+  prec ~ dgamma(5/2.0, 5*10.0/2.0)
+  sig = sqrt(1.0 / prec)
+}"
+```
+
+Note that this model is different from how we would normally build a linear regression model in JAGS. The intercept is now dependant on the region, each if which is a different random variable with its own prior distributions.
+
+```{r}
+data1_jags <- list(y=dat$loginfant, 
+                   log_income=dat$logincome, 
+                   is_oil=as.numeric(dat$oil=="yes"),
+                   region=as.numeric(dat$region))
+
+params1 <- c("a0", "a", "b", "sig", "tau")
+
+mod1 <- jags.model(textConnection(mod1_string), data=data1_jags, n.chains=3)
+update(mod1, 1e3)
+
+mod1_sim <- coda.samples(model=mod1, variable.names=params1, n.iter=1e3)
+mod1_csim <- as.mcmc(do.call(rbind, mod1_sim))
+
+
+plot(mod1_sim)
+```
+
+These chains don't look that great as there is some autocorrelation, if you wanted to get posterior HPD intervals then it might be a good idea to change the parameters a little bit to get better chains.
+
+```{r}
+dic1 <- dic.samples(mod1, 1e3)
+
+dic1
+```
+
+The normal linear model had a penalty of roughly 229, so this model is an improvement. Note as well that the penalty is lower than the actual number of parameters in this model (9), they are sharing information in the heirarchical structure.
+
+```{r}
+summary(mod1_sim)
+```

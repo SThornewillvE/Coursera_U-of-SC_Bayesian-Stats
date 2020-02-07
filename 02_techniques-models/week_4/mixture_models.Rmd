@@ -1,0 +1,93 @@
+---
+title: "Bayesian Mixture Models"
+author: "Simon Thornewill von Essen"
+date: "7 2 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("rjags")
+library("coda")
+
+set.seed(11)
+```
+
+In this R-Markdown, we will be looking into how we can build Bayesian Mixture Models using `rjags`.
+
+```{r}
+dat <- read.csv("./mixture.csv", header=FALSE)
+
+head(dat, 3)
+nrow(dat)
+```
+
+We can see that we have 200 observations of an unnamed variable with no explanatory variables.
+
+```{r}
+y = dat$V1
+
+plot(density(y))
+```
+
+We can see that this variable is a mixture of two normally distributed variables, or at least can be modeled as such.
+
+```{r}
+mod1_string <- "model{
+  for(i in 1:length(y)){
+    y[i] ~ dnorm(mu[z[i]], prec)
+    z[i] ~ dcat(omega)
+  }
+  
+  mu[1] ~ dnorm(-1.0, 1.0/100.0)
+  mu[2] ~ dnorm(1.0, 1.0/100.0) T(mu[1], )
+  
+  prec ~ dgamma(1.0/2.0, 1.0*1.0/2.0)  # Note that 1.0 is the guess sample size and 1.0 guess for the value
+  sig = sqrt(1.0/prec)
+  
+  omega ~ ddirch(c(1.0, 1.0))
+}"
+
+```
+
+Note that the difference here is that `z[i]` comes from a categorical distribution, which you can think of as simply being an extension of a bernoulli distribution, where the number of outcomes is larger than 2. 
+
+The parameter for this is drawn from a dirichlet distribution, which takes a vector of shape parameters, theyre similar to using the counts of each part of the distribution like how we might update a beta distribution.
+
+Note that the `T` function in the `mu[2]` distribution binds this mean to be larger than `mu[1]`, otherwise the model might have a hard time identifying the means of this multi modal distribution.
+
+```{r}
+data1_jags <- list(y=y)
+params1 <- c("mu", "sig", "omega", "z[1]", "z[31]", "z[49]", "z[6]")
+
+mod1 <- jags.model(textConnection(mod1_string), data=data1_jags, n.chains=3)
+update(mod1, 1e3)
+
+mod1_sim <- coda.samples(mod1, variable.names=params1, 1e3)
+mod1_csim <- as.mcmc(do.call(rbind, mod1_sim))
+
+```
+
+For the parameters that we want to measure, we choose specific values for `z` which we think will be in one normal distribution more often than another or will be in between the two. We don't want to monitor all of the `z`s because that would be a lot for one person to take in.
+
+```{r}
+plot(mod1_sim)
+```
+
+```{r}
+summary(mod1_sim)
+```
+
+`mu[1]` has a posterior mean of roughly -2.1, which looks to be about right. Same goes for the posterior mean for `mu[2]`.
+
+The values for omega dictate the proportion between the two means, which looks to be a vector of `[0.4, 0.6]`
+
+Let's take a look at the posterior means for `z` via a graph.
+
+```{r}
+par(mfrow=c(2, 2))
+densplot(mod1_csim[,c("z[1]", "z[31]", "z[49]", "z[6]")])
+```
+
+We can see here that Z is most likely to belong to the 1st distribution, we werent so sure about `z[31]` and the distribution is reflective of that. The same goes for `z[49]`, but we are more confident that it belongs to the second distribution. Finally, we are very confident that `z[6]` belongs to the second distribution.

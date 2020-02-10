@@ -1,0 +1,169 @@
+---
+title: "Weight Analysis"
+author: "Simon Thornewill von Essen"
+date: "7 2 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("rjags")
+library("coda")
+library("ggplot2")
+library("reshape2")
+
+setwd("C:\\Users\\sthornewillvonessen\\Documents\\Online_Courses\\Coursera_U-of-SC_Bayesian-Stats\\02_techniques-models\\week_5_project")
+```
+
+## Import Data
+
+```{r}
+df <- read.csv("./dat/RENPHO-Simon_clean.csv")
+
+# Set Factors
+df$month <- as.factor(df$month)
+df$week_of_year <- as.factor(df$week_of_year)
+
+head(df, 3)
+
+```
+
+## Graphical Exploration of Data
+
+```{r}
+ggplot(data=df, aes(x=mass_kg, y=body_fat_perc, alpha=0.6)) + 
+  geom_point() + 
+  xlab("Body Weight (KG)") + 
+  ylab("Body Fat (%)")+
+  ggtitle("Body Fat % vs. body weight in KG") + 
+  theme(legend.position = "none") + 
+  ggsave("./plots/01_bf_vs_bw.png",
+         dpi="retina",
+         width = 10,
+         height = 6)
+```
+
+```{r}
+ggplot(data=df, aes(x=month, y=mass_kg, fill=month)) + 
+  geom_boxplot() + 
+  ylab("Body Weight (KG)") + 
+  xlab("Month of Year")+
+  ggtitle("Month over Month Change in Body Weight (KG)") + 
+  guides(fill=guide_legend(title="Month of Year"))+ 
+  ggsave("./plots/02_bw_vs_mnth.png",
+       dpi="retina",
+       width = 10,
+       height = 6)
+```
+
+```{r}
+
+ggplot(data=df, aes(x=week_of_year, y=mass_kg, fill=week_of_year)) + 
+  geom_boxplot() + 
+  ylab("Body Weight (KG)") + 
+  xlab("Week of Year")+
+  ggtitle("Week over Week Change in Body Weight (KG)") + 
+  guides(fill=guide_legend(title="Week of Year"))+ 
+  ggsave("./plots/03_bw_vs_wk.png",
+       dpi="retina",
+       width = 10,
+       height = 6)
+
+```
+
+## Modeling in JAGS
+
+### Model Postulation
+
+
+```{r}
+mod1_string <- "model{
+  for(i in 1:length(y)){
+    y[i] ~ dnorm(mu[month[i]], prec)
+  }
+  
+  for(j in 1:max(month)){
+    mu[j] ~ dnorm(0.0, 1.0/1.0e6)
+  }
+  
+  prec ~ dgamma(1.0/2.0, 1.0*1.0/2.0)
+  sig = sqrt(1.0 / prec)
+}"
+
+data1_jags <- list(y=df$mass_kg, month=df$month)
+
+params1 <- c("mu", "sig")
+
+mod1 <- jags.model(textConnection(mod1_string), data=data1_jags, n.chains=3)
+update(mod1, 1e3)
+
+mod1_sim <- coda.samples(mod1, variable.names=params1, 1e3)
+mod1_csim <- as.mcmc(do.call(rbind, mod1_sim))
+
+png(file="./plots/04_chains_ANOVA.png")
+plot(mod1_sim)
+dev.off()
+
+plot(mod1_sim)
+```
+
+
+### Convergence Diagnostics
+
+```{r}
+gelman.diag(mod1_sim)
+```
+
+```{r}
+autocorr.diag(mod1_csim)
+```
+
+```{r}
+png(file="./plots/05_autocorr.png")
+autocorr.plot(mod1_csim)
+dev.off()
+
+autocorr.plot(mod1_csim)
+```
+
+```{r}
+effectiveSize(mod1_csim)
+```
+
+```{r}
+dic.samples(mod1, 1e3)
+```
+
+## Posterior Summaries
+
+```{r}
+mean(mod1_csim[,1] > mod1_csim[,2])
+```
+
+```{r}
+df_post <- as.data.frame(mod1_csim)
+df_post$id <- seq(1:length(df_post))
+
+head(df_post, 3)
+```
+
+```{r}
+long <- melt(df_post[, c(1, 2, 4)], id.vars="id")
+
+head(long)
+```
+
+
+```{r}
+ggplot(long, aes(x=value, fill=variable)) +
+  geom_density() + 
+  ylab("Posterior Probability Density") + 
+  xlab("Weight (Kg)") +
+  guides(fill=guide_legend(title="Month of Year"))+ 
+  ggtitle("Visualisation of Posterior Probability Density for Mean Weights betw. Months") + 
+  ggsave("./plots/06_post_dist_weights.png",
+     dpi="retina",
+     width = 10,
+     height = 6)
+```

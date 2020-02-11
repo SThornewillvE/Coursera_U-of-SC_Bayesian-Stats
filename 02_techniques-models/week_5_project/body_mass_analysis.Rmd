@@ -13,7 +13,7 @@ library("coda")
 library("ggplot2")
 library("reshape2")
 
-setwd("C:\\Users\\sthornewillvonessen\\Documents\\Online_Courses\\Coursera_U-of-SC_Bayesian-Stats\\02_techniques-models\\week_5_project")
+setwd("C:\\Users\\SimonThornewill\\Documents\\Coursera_U-of-SC_Bayesian-Stats\\02_techniques-models\\week_5_project")
 ```
 
 ## Import Data
@@ -84,7 +84,7 @@ mod1_string <- "model{
   }
   
   for(j in 1:max(month)){
-    mu[j] ~ dnorm(0.0, 1.0/1.0e6)
+    mu[j] ~ dnorm(0.0, 1/1.0e6)
   }
   
   prec ~ dgamma(1.0/2.0, 1.0*1.0/2.0)
@@ -135,21 +135,103 @@ effectiveSize(mod1_csim)
 dic.samples(mod1, 1e3)
 ```
 
-## Posterior Summaries
+## Tests for Assumptions
+
+### Residual Analysis
 
 ```{r}
-mean(mod1_csim[,1] > mod1_csim[,2])
+pm_params <- colMeans(mod1_csim)
+
+pm_params
 ```
 
 ```{r}
-df_post <- as.data.frame(mod1_csim)
+yhat <- pm_params[1:3][data1_jags$month]
+resid <- data1_jags$y - yhat
+
+df_resid <- data.frame(yhat=yhat, resid=resid, y=data1_jags$y, cat=factor(data1_jags$month))
+
+ggplot(data = df_resid, aes(x=(1:nrow(df_resid)), y=resid, color=cat)) +
+  geom_point() +
+  ggtitle("Residuals") +
+  xlab("Observation Number") +
+  ylab("Residual") +
+  ggsave("./plots/06_mod1_resid_1.png",
+     dpi="retina",
+     width = 10,
+     height = 6)
+```
+
+```{r}
+ggplot(data = df_resid, aes(x=yhat, y=resid)) +
+  geom_point(aes(color=cat)) +
+  ggtitle("Residuals for each group") + 
+  ggsave("./plots/06_mod1_resid_2.png",
+   dpi="retina",
+   width = 10,
+   height = 6)
+```
+
+### Alternative Models
+
+```{r}
+mod2_string <- "model{
+  for(i in 1:length(y)){
+    y[i] ~ dnorm(mu[month[i]], prec[month[i]])
+  }
+  
+  for(j in 1:max(month)){
+    mu[j] ~ dnorm(0.0, 1/1.0e6)
+    prec[j] ~ dgamma(1.0/2.0, 1.0*1.0/2.0)
+    sig[j] = sqrt(1.0 / prec[j])
+  }
+}"
+
+
+mod2 <- jags.model(textConnection(mod2_string), data=data1_jags, n.chains=3)
+update(mod2, 1e3)
+
+mod2_sim <- coda.samples(mod2, variable.names=params1, 1e3)
+mod2_csim <- as.mcmc(do.call(rbind, mod2_sim))
+
+png(file="./plots/04_chains_ANOVA_2.png")
+plot(mod2_sim)
+dev.off()
+
+plot(mod2_sim)
+```
+
+```{r}
+dic1 <- dic.samples(mod1, 1e3)
+dic2 <- dic.samples(mod2, 1e3)
+
+dic1
+
+dic2
+
+```
+
+
+## Posterior Summaries
+
+```{r}
+mean(mod2_csim[,1] > mod2_csim[,2])
+```
+
+```{r}
+summary(mod2_sim)
+```
+
+
+```{r}
+df_post <- as.data.frame(mod2_csim)
 df_post$id <- seq(1:length(df_post))
 
 head(df_post, 3)
 ```
 
 ```{r}
-long <- melt(df_post[, c(1, 2, 4)], id.vars="id")
+long <- melt(df_post[, c(1, 2, 5)], id.vars="id")
 
 head(long)
 ```
@@ -162,7 +244,7 @@ ggplot(long, aes(x=value, fill=variable)) +
   xlab("Weight (Kg)") +
   guides(fill=guide_legend(title="Month of Year"))+ 
   ggtitle("Visualisation of Posterior Probability Density for Mean Weights betw. Months") + 
-  ggsave("./plots/06_post_dist_weights.png",
+  ggsave("./plots/07_post_dist_weights.png",
      dpi="retina",
      width = 10,
      height = 6)

@@ -11,3 +11,7 @@ Note that I will not be uploading results for the tests, only what we learn in l
 ## Important files and notes
 
 Files are written in R.
+
+## Capstone Project Report
+
+Final report can be found [here](https://github.com/SThornewillvE/Coursera_U-of-SC_Bayesian-Stats/blob/master/02_techniques-models/week_5_project/report/capstone-project_weight-loss.pdf).
